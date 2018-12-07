@@ -53,88 +53,13 @@ QSD_samples_generator::~QSD_samples_generator()
   MPI_clean();
 }
 
-///////////////////////////////////////////////////
-/*
- * The function performing FV ParRep
- */
-///////////////////////////////////////////////////
-
 void QSD_samples_generator::run()
 {
-  //   TODO
-  fprintf(stdout,"\nRunning a Generalized ParRep with Gelman-Rubin statistics and Fleming-Viot particle processes.\n"
+  fprintf(stdout,"\nRunning a Fleming-Viot particle process.\n"
                  "Role of this replica is: %s\n",role_string.at(my_FV_role).c_str());
-  
-  // open database of states
-//   if(i_am_master)
-//     db_open();
-  
-  //   TODO
-  /*
-   * Stage 0 : Equilibrate the system for some steps
-   *  and use as reference state at the beginning
-   *  only masterRank does this and then broadcasting is used for other ranks
-   */
-//   if(equil_steps>0)
-//   {
-//     // only masterRank equilibrates
-//     if(i_am_master)
-//     {
-//       do_equilibration();
-//     }
-//     MPI_Barrier(global_comm);
-//     
-//     MPIutils::mpi_broadcast_atom_array(dat,at.get(),masterRank,global_comm);
-//     // not required on masterRank : provide to openmm coordinates and velocities from equilibration
-//     if(!i_am_master)
-//     {
-//       md->setCrdsVels(at.get());
-//     }
-//       
-//     MPI_Bcast(&equil_e.ene[0],3,MPI_DOUBLE,masterRank,global_comm);
-//     
-//     // update lua interface
-//     luaItf->set_lua_variable("epot",equil_e.epot());
-//     luaItf->set_lua_variable("ekin",equil_e.ekin());
-//     luaItf->set_lua_variable("etot",equil_e.etot());
-//     luaItf->set_lua_variable("referenceTime",ref_clock_time);
-//   }
-//   
-//   MPI_Barrier(global_comm);
-  
-  // after equilibration and before starting parrep algorithm it is time to initialise the Lua code defining a state
+
+  // it is time to initialise the Lua code defining a state
   lua_state_init();
-  
-//   /*
-//    * First be sure that the system is within a metastable state, if not perform transient propagation
-//    */
-//   bool need_transient_propagation = lua_check_transient();
-//   if(need_transient_propagation)
-//   {
-//     ENERGIES tr_e;
-//     
-//     if(i_am_master)
-//     {
-//       do_transient_propagation(tr_e);
-//     }
-//     MPI_Barrier(global_comm);
-//     
-//     // broadcast to the others
-//     MPI_Bcast(&ref_clock_time,1,MPI_DOUBLE,masterRank,global_comm);
-//     MPI_Bcast(tr_e.ene.data(),3,MPI_DOUBLE,masterRank,global_comm);
-//     MPIutils::mpi_broadcast_atom_array(dat,at.get(),masterRank,global_comm);
-//     
-//     // update lua interface
-//     luaItf->set_lua_variable("epot",tr_e.epot());
-//     luaItf->set_lua_variable("ekin",tr_e.ekin());
-//     luaItf->set_lua_variable("etot",tr_e.etot());
-//     luaItf->set_lua_variable("referenceTime",ref_clock_time);
-//     
-//     // call state_init again now that we are sure to be within a state
-//     lua_state_init();
-//   }
-  
-  MPI_Barrier(global_comm);
   
   uint32_t num_fv_cycles = 0;
   const uint32_t stop_after_N_fv_cycles = (uint32_t) dat.nsteps;
@@ -143,11 +68,10 @@ void QSD_samples_generator::run()
    */
   do
   {
-    //   TODO
-    LOG_PRINT(LOG_INFO,"New ParRepFV loop iteration...\n");
+    LOG_PRINT(LOG_INFO,"New FV loop iteration...\n");
     
     fprintf(stdout,"\n//---------------------------------------------------------------------------------------------//\n");
-    fprintf(stdout,    "New ParRepFV loop iteration...\n\n");
+    fprintf(stdout,    "New FV loop iteration...\n");
     
     fv_local_time = 0.;
     fv_e = ENERGIES();
@@ -165,130 +89,57 @@ void QSD_samples_generator::run()
     luaItf->set_lua_variable("epot",fv_e.epot());
     luaItf->set_lua_variable("ekin",fv_e.ekin());
     luaItf->set_lua_variable("etot",fv_e.etot());
-//     luaItf->set_lua_variable("referenceTime",ref_clock_time);
     
-    // TODO call Lua code here for saving the N initial conditions obtained from the F-V procedure
-    lua_save_conditions();
+    // call Lua code here for saving the N initial conditions obtained from the F-V procedure
+    lua_save_conditions(fv_local_time);
+    
+    MPI_Barrier(global_comm);
+    
+    // use one of the N initial condition obtained in the current run as the starting point of the next iteration
+    int32_t candidate = -1;
+    if(my_FV_role == REF_WALKER)
+      candidate = get_int32_min_max(0,mpi_gcomm_size-1);
+    
+    MPI_Bcast(&candidate,1,MPI_INT32_T,masterRank,global_comm);
+    
+    LOG_PRINT(LOG_INFO,"For the next FV iteration, initial coordinates will be the one currently associated to rank %d\n",candidate);
+    if(LOG_SEVERITY >= LOG_INFO)
+      fprintf(stdout,  "For the next FV iteration, initial coordinates will be the one currently associated to rank %d\n",candidate);
+    
+    if(mpi_id_in_gcomm == candidate)
+      md->getState(nullptr,&fv_e,nullptr,at.get());
+    
+    MPIutils::mpi_broadcast_atom_array(dat,at.get(),candidate,global_comm);
 
-    /*
-     * stage 2 : Run parallel dynamics 
-     */
-//     dyna_local_time = 0.;
-//     dyna_e = ENERGIES();
-//     breakerID = numeric_limits<uint32_t>::max();
-//     dyna_cycles_done = 0;
-      
-    // each rank does its independent dynamics
-//     do_dynamics();
-    // there was already a barrier at the end of do_dynamics() so from here we suppose synchronization of all the replicas
+    // we reset the omm time
+    md->setSimClockTime(0.);
     
-    /*
-     * find and send the id of the rank that escaped the state to all others
-     * MPI_MIN corresponds to a min of the argmin
-     */
-//     MPI_Allreduce(MPI_IN_PLACE,&breakerID,1,MPI_UINT32_T,
-//                   MPI_MIN,global_comm);
-    
-    // transient propagation if required
-//     if(mpi_id_in_gcomm==(int32_t)breakerID)
-//     {
-//       need_transient_propagation = lua_check_transient();
-//       if(need_transient_propagation)
-//       {
-//         do_transient_propagation(dyna_e);
-//         luaItf->set_lua_variable("referenceTime",ref_clock_time);
-//       }
-//     }
-//     MPI_Barrier(global_comm);
-    
-//     /*
-//      * broacast data from breaking replica to the others
-//      */
-//     MPI_Bcast(&dyna_local_time,1,MPI_DOUBLE,breakerID,global_comm);
-//     MPI_Bcast(&dyna_cycles_done,1,MPI_UINT32_T,breakerID,global_comm);
-//     MPI_Bcast(&ref_clock_time,1,MPI_DOUBLE,breakerID,global_comm);
-//     MPI_Bcast(dyna_e.ene.data(),3,MPI_DOUBLE,breakerID,global_comm);
-//     
-    // coordinates and velocities are broadcasted using a non blocking ibroadcast so that we can do something else in the mean time
-//     MPIutils::mpi_broadcast_atom_array(dat,at.get(),breakerID,global_comm);
-    
-    /*
-     * the ref_clock_time is updated using the escape time
-     * This formula comes from the article "parRep for markov chains" (Aristoff, Lelièvre, Simpson)
-     */
-//     double escape_time =  (double)(mpi_gcomm_size-1);
-//     escape_time *= ((double)dyna_cycles_done)*t_poll;
-//     escape_time += ((double)breakerID)*t_poll ;
-//     escape_time += dyna_local_time;
-    
-//     ref_clock_time += escape_time;
-    
-//     LOG_PRINT(LOG_INFO,"Parallel dynamics stopped because rank %u escaped (after %.2lf ps).\n",  breakerID,dyna_local_time);
-//     fprintf(    stdout,"Parallel dynamics stopped because rank %u escaped (after %.2lf ps).\n\n",breakerID,dyna_local_time);
-//     
-//     LOG_PRINT(LOG_INFO,"ParRep_FV escape_time is %.2lf ps\n",escape_time);
-//     fprintf(    stdout,"ParRep_FV escape_time is %.2lf ps\n\n",escape_time);
-//     
-//     // update lua interface
-//     luaItf->set_lua_variable("epot",dyna_e.epot());
-//     luaItf->set_lua_variable("ekin",dyna_e.ekin());
-//     luaItf->set_lua_variable("etot",dyna_e.etot());
-//     luaItf->set_lua_variable("referenceTime",ref_clock_time);
-
-//     // save the state and the escape time to the database
-//     if(i_am_master)
-//     {
-//       db_insert(true,fv_local_time,escape_time);
-//     }
-//     
-//     // if necessary db backup is performed
-//     if(i_am_master && ((ref_clock_time-last_db_backup) > db_backup_frequency_ps) )
-//     {
-//       db_backup();
-//       last_db_backup = ref_clock_time;
-//     }
-    
-    /*
-     * prepare a new loop iteration
-     */
-    
-//     // we reset the omm time
-//     md->setSimClockTime(0.);
-//     // and each rank uses the system of the dyna breaking one
-//     md->setCrdsVels(at.get());
+    if(mpi_id_in_gcomm != candidate)
+    {
+      // each rank uses the coordintes of the candidate
+      md->setCrdsVels(at.get());
+    }
     
     // now all ranks need to re-initialize the state identification code on Lua's side
-//     lua_state_init();
+    lua_state_init();
     
     /*
      * Ready to loop again
      */
-//     MPI_Barrier(global_comm);
+    
+    MPI_Barrier(global_comm);
     
   }while(num_fv_cycles < stop_after_N_fv_cycles);
   // NOTE End of main loop here
-  
-//   if(i_am_master)
-//   {
-//     // backup database to file if required before exiting simulation 
-//     db_backup();
-//     db_close();
-//   }
-//   
+
   MPI_Barrier(global_comm);
       
 } // end of function run
 
-///////////////////////////////////////////////////
-/*
- * Parrep functions : represent successive stages of the algorithm
- */
-///////////////////////////////////////////////////
-
 void QSD_samples_generator::do_FlemingViot_procedure()
 {
   LOG_PRINT(LOG_INFO,"Rank %d performing Fleming-Viot procedure\n",  mpi_id_in_gcomm);
-  fprintf(stdout,    "Rank %d performing Fleming-Viot procedure\n\n",mpi_id_in_gcomm);
+  fprintf(stdout,    "Rank %d performing Fleming-Viot procedure\n",mpi_id_in_gcomm);
   
   /**
    *  the C++ interface for collecting Gelman-Rubin statistics
@@ -455,134 +306,31 @@ void QSD_samples_generator::do_FlemingViot_procedure()
     if( steps_since_last_check_state%fv_check != 0 )
       continue;
     
-    // check running time and depending on return value perform a backup before exiting
-//     if(check_running_time())
-//       doBackupAndExit();
 
     left_state = lua_check_state();
     i_need_branching = left_state;
     steps_since_last_check_state = 0;
-    
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    //  if REF_WALKER exiting: it is required to tell the FV_WORKER s that we have to reset
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    
-//     if( (my_FV_role == REF_WALKER) && left_state )
-//     {
-//       LOG_PRINT(LOG_INFO,"Rank %d (Ref. Walker) exited the ref. state...\n",  mpi_id_in_gcomm);
-//       fprintf(stdout,    "Rank %d (Ref. Walker) exited the ref. state...\n\n",mpi_id_in_gcomm);
-//       
-//       // TODO
-// //       db_insert(false,0.0,fv_local_time);
-//       
-//       // set the reset_loop flag to true for all other replicas so that they stop soon
-//       reset_loop = true;
-//       
-//       MPI_Win_lock_all(MPI_MODE_NOCHECK,reset_window);
-//       for(int32_t i=1; i<mpi_gcomm_size; i++)
-//       {
-//         MPI_Put(&reset_loop, //const void *origin_addr
-//                 1,MPI_CXX_BOOL, //int origin_count, MPI_Datatype origin_datatype,
-//                 i,0,  // int target_rank, MPI_Aint target_disp,
-//                 1,MPI_CXX_BOOL, // int target_count, MPI_Datatype target_datatype,
-//                 reset_window); // MPI_Win win
-//       }
-//       MPI_Win_unlock_all(reset_window);
-//       
-// //       // perform transient propagation if required
-// //       bool need_transient_propagation = lua_check_transient();
-// //       if(need_transient_propagation)
-// //       {
-// //         do_transient_propagation(fv_e);
-// //         luaItf->set_lua_variable("referenceTime",ref_clock_time);
-// //         luaItf->set_lua_variable("epot",fv_e.epot());
-// //         luaItf->set_lua_variable("ekin",fv_e.ekin());
-// //         luaItf->set_lua_variable("etot",fv_e.etot());
-// //       }
-//     }
 
     /*
      * we use a non-blocking barrier because we execute between the barrier and the corresponding MPI_Wait routine
      * some independent computations
      */
-//     MPI_Ibarrier(global_comm,&barrier_req);
+    MPI_Ibarrier(global_comm,&barrier_req);
     
-    // check running time and depending on return value perform a backup before exiting
-//     if(check_running_time())
-//       doBackupAndExit();
+    /*
+     * attach the windows to the observable values
+     */
+    for(const GR_function_name& n: gr_names)
+    {
+      MPI_Win& w = gr_windows[n];
+      MPI_Aint& addr = gr_addr[n];
+      
+      MPI_Win_attach(w, gr_observations[n], obsIndex*sizeof(double));
+      MPI_Get_address(gr_observations[n],&addr);
+    }
     
-//     /*
-//      * attach the windows to the observable values
-//      */
-//     for(const GR_function_name& n: gr_names)
-//     {
-//       MPI_Win& w = gr_windows[n];
-//       MPI_Aint& addr = gr_addr[n];
-//       
-//       MPI_Win_attach(w, gr_observations[n], obsIndex*sizeof(double));
-//       MPI_Get_address(gr_observations[n],&addr);
-//     }
-//     
-//     MPI_Wait(&barrier_req,MPI_STATUS_IGNORE);
-//     
-//     // executed by all ranks when a reset is required
-//     if(reset_loop)
-//     {
-//       MPIutils::mpi_broadcast_atom_array(dat,at.get(),masterRank,global_comm);
-//       MPI_Bcast(fv_e.ene.data(),3,MPI_DOUBLE,masterRank,global_comm);
-// //       MPI_Bcast(&ref_clock_time,1,MPI_DOUBLE,masterRank,global_comm);
-//       
-//       converged = false;
-//       reset_loop = false;
-//       
-//       steps_since_last_check_state = 0;
-//       steps_since_beginning = 0;
-//       
-//       if(barrier_req != MPI_REQUEST_NULL)
-//         MPI_Request_free(&barrier_req);
-// 
-//       // undo the memory attachment
-//       for(const GR_function_name& n: gr_names)
-//       {
-//         MPI_Win& w = gr_windows[n];
-//         MPI_Win_detach(w, gr_observations[n]);
-//         gr_addr[n] = 0;
-//         obsIndex = 0;
-//       }
-//       
-//       for(size_t i=0; i<gr_names.size(); i++)
-//       {
-//         if(igather_obs_reqs[i] != MPI_REQUEST_NULL)
-//           MPI_Request_free(&igather_obs_reqs[i]);
-//       }
-//       
-//       md->setSimClockTime(0.);
-//       
-//       luaItf->set_lua_variable("epot",fv_e.epot());
-//       luaItf->set_lua_variable("ekin",fv_e.ekin());
-//       luaItf->set_lua_variable("etot",fv_e.etot());
-//       
-//       // update reference clock time
-// //       ref_clock_time += fv_local_time;
-// //       luaItf->set_lua_variable("referenceTime",ref_clock_time);
-//       
-//       if(my_FV_role == FV_WALKER)
-//       {
-//         md->setCrdsVels(at.get());
-//       }
-//       else /* REF WALKER reset chains of accumulated G-R Observables*/
-//       {
-//         gr->reset_all_chains();
-//       }
-//       
-//       // now all ranks need to check again what is the current state in order to be ready for next iteration
-//       lua_state_init();
-// 
-//       LOG_PRINT(LOG_INFO,"Reset of ref_walker and fv_walker s, starting again the FV loop...\n");
-//       
-//       continue; // go back to beginning of the do-while loop
-//     }
-//     
+    MPI_Wait(&barrier_req,MPI_STATUS_IGNORE);
+    
     /*
      *  F-V branching procedure will start here
      *  We should randomly choose one of the other ranks, and ask for its values for :
@@ -595,7 +343,6 @@ void QSD_samples_generator::do_FlemingViot_procedure()
      */
 
     // if required, find a valid candidate for branching
-//     if( (my_FV_role == FV_WALKER) && i_need_branching)
     if(i_need_branching)
     {
       // when a rank will branch it will send a communication request to another node (a 'candidate')
@@ -610,7 +357,6 @@ void QSD_samples_generator::do_FlemingViot_procedure()
       {
         candidate = get_int32_min_max(0,mpi_gcomm_size-1);
         
-//         if( (candidate == mpi_id_in_gcomm) || (candidate == masterRank) )
         if(candidate == mpi_id_in_gcomm)
           continue;
         
@@ -687,11 +433,6 @@ void QSD_samples_generator::do_FlemingViot_procedure()
     // again this barrier can't be avoided otherwise we will detach memory too early
     // NOTE but we can still do something else before checking the barrier completion ...
     MPI_Ibarrier(global_comm,&barrier_req);
-    
-    // the following is independent computations to hide latency ...
-    // check running time and depending on return value perform a backup before exiting
-//     if(check_running_time())
-//       doBackupAndExit();
     
     // now we check barrier completion here
     MPI_Wait(&barrier_req,MPI_STATUS_IGNORE);
@@ -799,9 +540,6 @@ void QSD_samples_generator::do_FlemingViot_procedure()
     recvObsMap.clear();
   }
 
-  // update reference clock time
-//   ref_clock_time += fv_local_time;
-
   //----------------------
   
   // reset GR object before continuing
@@ -830,20 +568,9 @@ void QSD_samples_generator::do_FlemingViot_procedure()
     MPI_Win_free(&(gr_windows[n]));
     MPI_Win_free(&(gr_windows_addr[n]));
   }
-
-  // this one costs nothing 
-  MPI_Barrier(global_comm);
   
 } // end of do_FlemingViot_procedure
 
-/**
- * @brief This function is in charge of initialising some MPI variables used by the ParRep code
- * 
- * each derived class may re-implement its own; if overriden, use the second constructor of this class and call yourself MPI_setup in derived class ctor
- * 
- * By default, just sets masterRank to 0 and creates a copy of the MPI_COMM_WORLD and of its associated MPI_group
- * 
- */
 void QSD_samples_generator::MPI_setup()
 {
   LOG_PRINT(LOG_DEBUG,"Call of the default MPI_setup() defined in file %s at line %d \n",__FILE__,__LINE__);
@@ -866,11 +593,6 @@ void QSD_samples_generator::MPI_setup()
   
 }
 
-/**
- * @brief This function is in charge of cleaning some MPI variables used by the ParRep code
- * 
- * each derived class may re-implement its own; if overriden, call yourself MPI_clean in derived class dtor
- */
 void QSD_samples_generator::MPI_clean()
 {
   LOG_PRINT(LOG_DEBUG,"Call of the default MPI_clean() defined in file %s at line %d \n",__FILE__,__LINE__);

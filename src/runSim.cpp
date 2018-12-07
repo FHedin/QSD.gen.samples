@@ -62,9 +62,6 @@ void run_simulation(const string& inpf)
   // stores simulation parameters
   DATA dat;
   
-//   // start the chronometer in DATA now
-//   dat.start_time = chrono::steady_clock::now();
-  
   // for storing coordinates and velocities
   unique_ptr<ATOM[]> atmList(nullptr);
   
@@ -105,11 +102,6 @@ void run_simulation(const string& inpf)
   // get lua parsed parameters and map them to the dat structure
   const lua_ParVal_map& luaParams = luaItf->get_parsed_parameters_map();
   
-//   // get max run time to know when to interrupt properly the software instead of crashing on queuing systems
-//   dat.max_run_time_hours = chrono::duration<double, chrono::hours::period>(stod(luaParams.at("max_run_time_hours")));
-//   
-//   dat.minutes_to_stop_before_max_run_time = chrono::minutes(stoul(luaParams.at("minutes_to_stop_before_max_run_time")));
-  
   // get desired OpenMM platform
   string platform =   luaParams.at("platform");
   
@@ -122,8 +114,7 @@ void run_simulation(const string& inpf)
   string state =      luaParams.at("state");
   
   MPI_Barrier(MPI_COMM_WORLD);
-  
-  // TODO here allow possibility of other MD engine when ready
+
   try
   {
     md =  unique_ptr<MD_interface>(
@@ -165,7 +156,6 @@ void run_simulation(const string& inpf)
   luaItf->set_lua_variable("epot",iniE.epot());
   luaItf->set_lua_variable("ekin",iniE.ekin());
   luaItf->set_lua_variable("etot",iniE.etot());
-//   luaItf->set_lua_variable("referenceTime",0.0);
     
   // summary of the simulation
   fprintf(stdout,"\nStarting program with %d MPI ranks\n\n",num_procs);
@@ -176,7 +166,6 @@ void run_simulation(const string& inpf)
   fprintf(stdout,"Using OpenMM toolkit version '%s'\n",ommVersion.c_str());
 
   MPI_Barrier(MPI_COMM_WORLD);
-  
   
   unique_ptr<QSD_samples_generator> simulation;
   try

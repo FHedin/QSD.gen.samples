@@ -42,8 +42,7 @@ private:
   std::unique_ptr<MD_interface>& md;      ///< The interface to the MD engine
   std::unique_ptr<luaInterface>& luaItf;  ///< The Lua interface
 
-  // references to objects used by all parrep variants
-  const lua_ParVal_map& params;                                 ///< Map of Lua parameters
+  const lua_ParVal_map& params;                              ///< Map of Lua parameters
   const lua_function_state_init&      lua_state_init;        ///< Lua function for state initialization
   const lua_function_check_state&     lua_check_state;       ///< Lua function for state checking
   
@@ -54,7 +53,7 @@ private:
   const lua_function_data_save& lua_save_conditions;
   
   /*
-   * some MPI parameters and variables common to all parRep algorithms
+   * some MPI parameters and variables
    */
   int32_t masterRank = -1;    ///< the rank of the MPI master process ; set at initialization by MPI_setup()
   bool i_am_master = false; ///< Is this rank the masterRank ? set at initialization by MPI_setup()
@@ -68,7 +67,7 @@ private:
   int32_t mpi_gcomm_size = -1;   ///< the total number of ranks in global_comm
 
   /*
-   * some simulation parameters common to all parRep algorithms
+   * some simulation parameters
    */
   
   bool     left_state = false;    ///< for checking if the system left the state
@@ -77,9 +76,9 @@ private:
    * \enum 
    *  During the Fleming-Viot procedure, the MPI ranks are divided in 2 groups:
    *  + One reference walker: it will be the MPI masterRank, if it leaves the state the procedure is
-   *    stopped (equivalent to the decorrelation phase of the original ParRep Algorithm) 
-   *  + Fleming-Viot walkers: their role is to accumulate Gelman-Rubin statistics for assessing convergence
-   *    (equivalent to dephasing), if they leave the state they are cloned from one of other other FV_WALKER
+   *    stopped
+   *  + Fleming-Viot walkers: their role is to accumulate Gelman-Rubin statistics for assessing convergence to the 
+   *    QSD, if they leave the state they are cloned from one of other other FV_WALKER
    */
   enum FV_ROLE
   {
@@ -91,11 +90,6 @@ private:
   
   /// set string names corresponding to the FV_ROLE 's
   const std::map<FV_ROLE,std::string> role_string = { {FV_ROLE::REF_WALKER,"REF_WALKER"} , {FV_ROLE::FV_WALKER,"FV_WALKER"} };
-  
-  /*
-   * some simulation parameters only used by this version of ParRepFV
-   *  see parRep_abstract.hpp for common parameters
-   */
   
   // parameters for Fleming-Viot combined stage
   uint32_t gr_check; ///< frequency at which to accumulate G-R observables 
@@ -119,11 +113,24 @@ private:
   const std::vector<GR_function_name>& gr_names;
 
   /*
-   * DECLARATIONS : parrep simulation split in several methods
+   * DECLARATIONS
    */
 
+  /**
+   * @brief This function is in charge of initialising some MPI variables used by the class
+   * 
+   * each derived class may re-implement its own; if overriden, use the second constructor of this class and call yourself MPI_setup in derived class ctor
+   * 
+   * By default, just sets masterRank to 0 and creates a copy of the MPI_COMM_WORLD and of its associated MPI_group
+   * 
+   */
   void MPI_setup();
   
+  /**
+   * @brief This function is in charge of cleaning some MPI variables used by the code
+   * 
+   * each derived class may re-implement its own; if overriden, call yourself MPI_clean in derived class dtor
+   */
   void MPI_clean();
   
   /**

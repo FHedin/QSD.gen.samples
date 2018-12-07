@@ -62,9 +62,6 @@ int main(int argc, char* argv[])
   char  mpi_lib_version_string[MPI_MAX_LIBRARY_VERSION_STRING];
   int32_t  str_len = MPI_MAX_LIBRARY_VERSION_STRING;
   MPI_Get_library_version(mpi_lib_version_string,&str_len);
-  
-//   fprintf(stdout,"\nRunning program '%s' with MPI Library version '%s', MPI API version is '%d.%d'\n\n",argv[0],mpi_lib_version_string,version,subversion);
-//   fprintf(stderr,"\nRunning program '%s' with MPI Library version '%s', MPI API version is '%d.%d'\n\n",argv[0],mpi_lib_version_string,version,subversion);
 
   if(version < 3)
   {

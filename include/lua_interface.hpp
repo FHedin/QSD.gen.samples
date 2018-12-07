@@ -25,7 +25,7 @@
 #include "global.hpp"
 #include "md_interface.hpp"
 
-#ifdef PARREP_DEBUG_BUILD
+#ifdef DEBUG_BUILD
 #define USE_SOL_PROTECTED_FUNCTIONS
 #endif
 

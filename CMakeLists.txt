@@ -60,15 +60,25 @@ external/luasqlite3/lsqlite3.c
 
 add_executable(${TGT} ${SRCS})
 
+# more warnings for c
 set(cWarnings "-Wall -Wextra")
+
 # more warnings for c++
 # set(cxxWarnings "-Wall -Wextra -Wformat=2 -Wshadow -Wconversion -Wuseless-cast")
-set(cxxWarnings "-Wall -Wextra")
+# no-reorder is for ignoring some warnings from the omm library
+set(cxxWarnings "-Wall -Wextra -Wno-reorder")
 
-# set(cFeatures   "-fstack-protector-all -fstack-check")
-# set(cxxFeatures "-fstack-protector-all -fstack-check")
+set(cFeatures   "-fstack-protector-all -fstack-check")
+set(cxxFeatures "-fstack-protector-all -fstack-check")
 
 # enabling -ffast-math may provide extra performance by enabling supplementary vectorization
+
+set(cFeatures   "-ffast-math")
+# set(cxxFeatures "-ffast-math")
+# This is required if we try to bind the executable to a binary version of the OpenMM library compiled either with  g++ < 5 or with clang
+set(cxxFeatures "-ffast-math -D_GLIBCXX_USE_CXX11_ABI=0")
+
+
 #set(cFeatures   "-ffast-math -fopt-info-vec")
 #set(cxxFeatures "-ffast-math -fopt-info-vec")
 
@@ -76,13 +86,13 @@ set(cxxWarnings "-Wall -Wextra")
 #set(cxxFeatures "-stdlib=libstdc++")
 
 # C compiler flags
-set(CMAKE_C_FLAGS_DEBUG          "-std=c11 ${cWarnings} ${cFeatures} -O0 -g -DPARREP_DEBUG_BUILD")
+set(CMAKE_C_FLAGS_DEBUG          "-std=c11 ${cWarnings} ${cFeatures} -O0 -g -DDEBUG_BUILD")
 set(CMAKE_C_FLAGS_RELEASE        "-std=c11 ${cWarnings} ${cFeatures} -O3    -march=native")
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-std=c11 ${cWarnings} ${cFeatures} -O2 -g -march=native")
 set(CMAKE_C_FLAGS_MINSIZEREL     "-std=c11 ${cWarnings} ${cFeatures} -Os -s -march=native")
 
 # C++ compiler flags
-set(CMAKE_CXX_FLAGS_DEBUG          "-std=c++14 ${cxxWarnings} ${cxxFeatures} -O0 -g -DPARREP_DEBUG_BUILD")
+set(CMAKE_CXX_FLAGS_DEBUG          "-std=c++14 ${cxxWarnings} ${cxxFeatures} -O0 -g -DDEBUG_BUILD")
 set(CMAKE_CXX_FLAGS_RELEASE        "-std=c++14 ${cxxWarnings} ${cxxFeatures} -O3    -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-std=c++14 ${cxxWarnings} ${cxxFeatures} -O2 -g -march=native")
 set(CMAKE_CXX_FLAGS_MINSIZEREL     "-std=c++14 ${cxxWarnings} ${cxxFeatures} -Os -s -march=native")

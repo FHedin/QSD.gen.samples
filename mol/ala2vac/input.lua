@@ -1,21 +1,13 @@
 -- Input Lua script providing simulation parameters and functions for the QSD.gen.samples software
 -- All lines starting with '--' are comments and thus ignored
+
 -- Alanine dipeptide in gas phase, charmm FF
 
-print("Lua version : ",_VERSION)
+-- print("Lua version : ",_VERSION)
 
 --------------------------------------------------------------------------------------------------------------
 -- --------------- SIMULATION PARAMETERS ------------------------------
 --------------------------------------------------------------------------------------------------------------
-
--- This is used for defining a maximum allowed running time for the simulation
--- The starting time off the program is saved at initialisation
--- in max_run_time_hours the user stores for example the maximum running time allowed by the queueing system when running on a cluster
---  fractional representation is allowed, e.g. 1.25 would be 1 hour and 15 minutes
-max_run_time_hours = 24.0 -- default if not set in this script will be 24 hours
--- in minutes_to_stop_before_max_run_time the user requires the program to stop a few minutes before max_run_time_hours,
---  useful for large systems if the I/O may take some time; should be at least 1 minute, and no fractional value allowed
-minutes_to_stop_before_max_run_time = 1 -- default if not set in this script will be 5 minutes
 
 -- OpenMM platform to use
 --  AUTO : let OpenMM find the fastest platform (default)
@@ -45,19 +37,14 @@ state = { xml = "./mol/ala2vac/State.xml" }
 -- the number of times convergence to the QSD is obtained by performing a F-V cycle
 --  each time N (being the number of replicas) initial conditions are generated and saved
 -- no default, error if undefined
-numSteps = 10
+numSteps = 2
 
--- Define the type of ParRep simulation to perform, and provide its parameters
---  only one of the two following tables should be defined
-
--- FV ParRep (Lelièvre et al. algorithm): only "algorithm" and "GRobservables" are mandatory,
---  the others have default (c.f. documentation)
+-- this table holds parameters for the Fleming-Viot particle process
 simulation =
 {
-  -- parameters for the Fleming-Viot particle process.
-  --  A Fleming-Viot particle process is used for sampling the QSD,
-  --  without any a priori defined decorrelation or dephasing time stage.
-  --  Convergence is checked with Gelman-Rubin statistics
+  -- A Fleming-Viot particle process is used for sampling the QSD,
+  -- without any a priori defined decorrelation or dephasing time stage.
+  -- Convergence is checked with Gelman-Rubin statistics
   -- a frequency (in steps) at which to verify if the system left the current state during FV procedure
   checkFV = 250, -- 0.5 ps
   -- a frequency (in steps) at which to evaluate convergence using the Gelman-Rubin statistics
@@ -69,9 +56,9 @@ simulation =
   GRtol = 0.01
 }
 
---------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------
 -- --------------- IMPLICIT VARIABLES AND FUNCTIONS ------------------------------
---------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------
 
 -- Together with the previous variables, the following implicit global variables and functions
 -- are defined from the c++ code, and are accessible from the code you define below
@@ -137,13 +124,11 @@ simulation =
 -- get_minimised_energy(tolerance,maxSteps) : this function returns the minimised energy of the system, using the OpenMM L-BFGS minimiser
 --  note that coordinates are not affected, it just returns the minimum epot of the bassin in which dynamics currently evolves
 --  it returns a 3-tuple ep,ek,et (potential, kinetic and total energy)
---  the tolerance and maxSteps can be the above defined simulation.minimisationTolerance and simulation.minimisationMaxSteps
 --
 -- get_minimised_crdvels(tolerance,maxSteps) : this function returns a 2-tuple (crds,vels) containing
 --  a copy of coordinates and velocities after minimisation.
 --  crds and vels are both tables with x,y,z members, each of size natoms,  : e.g. crds.x[i] returns the x coordinate of atom i, idem for vels.x[i]
 --  note that C++/OpenMM coordinates are not modified if modifying this table : this is a safe read-only copy
---  the tolerance and maxSteps can be the above defined simulation.minimisationTolerance and simulation.minimisationMaxSteps
 --  NOTE lua indexing, starting from 1
 --
 -- hr_timer() : returns a variable representing a c++ high precision timer : can be used for measuring execution time.
@@ -158,19 +143,21 @@ simulation =
 --
 -- hr_timediff_us() and hr_timediff_ms() : same as above but exec time is returned respectively in microseconds and milliseconds
 --
+-- sleep_for_ms(t) or sleep_for_us(t) or sleep_for_ns(t) : will force the current replica to sleep (do nothing)
+--                                                         for a time t (unsigned 64 bit integer), respectively in micro, milli or nano seconds
 
---------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------
 -- --------------- USER DEFINED VARIABLES AND FUNCTIONS ------------------------------
---------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------
 
 -- Some of the following VARIABLES and FUNCTIONS are mandatory and called from C++ (if it is the case it is explicitly documented)
 -- If not they can be restricted to this file using the local keyword
 
 -- Define here local variables and functions used later within state_init() and check_state_left()
 
---------------------------------------------------------------------------------------------------------------
--- --------------- FUNCTIONS DEFINING A PARREP STATE ------------------------------
---------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
+-- --------------- FUNCTIONS DEFINING A METASTABLE STATE ------------------------------
+---------------------------------------------------------------------------------------
 
 -- TWO functions, state_init() and check_state_left(), will be called from c++ code to know if the 
 --  dynamics left the current state. You are free to define the state in any way, using variables defined explicitly in this file
@@ -277,8 +264,6 @@ end
 --  it should take no arguments
 --  it returns nothing
 -- Use it if you have global variables used in check_state_left() (or other functions) that you need to initialise
--- It will be called only once after equilibration from C++, before starting the parRep or parRep_FV algorithm
--- It can also be called at any time from this file if required
 function state_init()
 
   -- value of the phi and psi dihedral angles at initialisation
@@ -331,123 +316,136 @@ end
 -------------------------------------------------------------------
 -- --------------- STORAGE FUNCTIONS ------------------------------
 -------------------------------------------------------------------
--- TODO
 
-function save_FV_initial_conditions()
+-- The SQLite3 interface code was compiled in the main programm (libsqlite3 required on the system when compiling)
+-- Therefore we can drive a database from this lua script !
 
-  print("Dummy call to save_FV_initial_conditions() from replica",mpi_rank_id)
+local insert_statement_states  = [[ INSERT INTO CONDITIONS_LIST(COND_ID,NREPS,STATE,TAU_FV)
+                                    VALUES ($condid,$nreps,$state,$tau); ]]
 
+local insert_statement_crdvels = [[ INSERT INTO CRD_VELS (COND_ID,REP_ID,ATOM_ID,X,Y,Z,VX,VY,VZ)
+                                    VALUES ($condid,$repid,$atid,$x,$y,$z,$vx,$vy,$vz); ]]
+
+-- If database is locked by another replica already attempting a write operation, this makes sure we try again indefinitely but after waiting a bit
+local function busy_handler(udata,n_retries)
+--   sleep_for_us(1)
+  return 1
 end
 
+local db = nil
 
--- -- functions and variables use for storing data to a database are defined as members of the table SQLiteDB
--- --  the following can be defined as they are used from the c++ code : 
--- --    SQLiteDB.insert_statement_states
--- --    SQLiteDB.insert_statement_crdvels
--- --    function SQLiteDB.open()
--- --    function SQLiteDB.close()
--- --    function SQLiteDB.insert_state()
--- --    function SQLiteDB.backup_to_file()
--- --
--- -- if not defined within this file there are default empty functions defined, doing nothing
--- 
--- SQLiteDB={}
--- 
--- SQLiteDB.insert_statement_states  = [[ INSERT INTO STATES (PARREP_DONE,REF_TIME,ESC_TIME,STATE_FROM,STATE_TO,TAU)
---                                                    VALUES ($lprep,$reft,$esct,$state_from,$state_to,$tau); ]]
--- 
--- SQLiteDB.insert_statement_crdvels = [[ INSERT INTO CRDVELS (ID,X,Y,Z,VX,VY,VZ)
---                                                    VALUES ($id,$x,$y,$z,$vx,$vy,$vz); ]]
--- 
--- function SQLiteDB.open()
--- 
---   print('Lua SQLite3 opening an in-memory db on rank ',mpi_rank_id,' of ',mpi_num_ranks-1)
---   
---   database.backup_name = string.gsub(database.name,'%.','.'..mpi_rank_id..'.',1)
---   
---   -- open in memory database and enable foreign keys
---   SQLiteDB.db = sqlite3.open_memory()
---   SQLiteDB.db:exec("PRAGMA foreign_keys = ON;")
--- 
---   -- create the states table : it contains the escape time for this state
---   SQLiteDB.db:exec[[ CREATE TABLE STATES(
---                       ID          INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
---                       PARREP_DONE INTEGER NOT NULL,
---                       REF_TIME    REAL,
---                       ESC_TIME    REAL,
---                       STATE_FROM  TEXT,
---                       STATE_TO    TEXT,
---                       TAU         REAL); ]]
--- 
---   -- create the crdvels table : it contains coordinates and velocities of the system for a given 'states' record
---   SQLiteDB.db:exec[[ CREATE TABLE CRDVELS(
---                       ID INTEGER NOT NULL,
---                       X   REAL,
---                       Y   REAL,
---                       Z   REAL,
---                       VX  REAL,
---                       VY  REAL,
---                       VZ  REAL,
---                       FOREIGN KEY(ID) REFERENCES STATES(ID) ); ]]
--- 
---   SQLiteDB.backup_to_file()
--- 
--- end
--- 
--- function SQLiteDB.close()
--- 
---   print('Lua SQLite3 closing in-memory db on rank ',mpi_rank_id,' of ',mpi_num_ranks-1)
---   SQLiteDB.db:close()
--- 
--- end
--- 
--- local stateID=0
--- 
--- -- the first three arguments are always provided from c++ code
--- -- extra arguments might be provided by the ... and should be retrieved from Lua's side using the ... special token, converted to a table (see args below)
--- function SQLiteDB.insert_state(parRepDone,tauTime,escapeTime)
---   
---   local ref_time=referenceTime
---   local from=fromState
---   local to=toState
--- 
---   local stmt = SQLiteDB.db:prepare(SQLiteDB.insert_statement_states)
---   stmt:bind_names{lprep=parRepDone, reft=ref_time, esct=escapeTime, state_from=from, state_to=to, tau=tauTime}
---   stmt:step()
---   stmt:finalize()
---   
---   stateID = stateID+1
---   
---   for n=1,natoms
---   do
---     local x,y,z = get_coordinates(n)
---     local vx,vy,vz = get_velocities(n)
---     
---     stmt = SQLiteDB.db:prepare(SQLiteDB.insert_statement_crdvels)
---     stmt:bind_names{ id=stateID, x=x, y=y, z=z, vx=vx, vy=vy, vz=vz }
---     stmt:step()
---     stmt:finalize()
---     
---   end
--- 
--- end
--- 
--- function SQLiteDB.backup_to_file()
--- 
---   local back_db = sqlite3.open(database.backup_name)
---   back_db:exec("PRAGMA foreign_keys = ON;")
--- 
---   local backup = sqlite3.backup_init(back_db,"main",SQLiteDB.db,"main")
---   local ret = backup:step(-1)
---   if ret==sqlite3.DONE then
---     print('Lua SQLite3 performed db backup to file ',database.backup_name,' successfully, at time : ',referenceTime,' ps')
---   else
---     print('Lua SQLite3 had problem when performing backup to file ',database.backup_name,' error is : ',back_db:errmsg())
---   end
--- 
---   backup:finish()
--- 
--- end
+-- database initially created and tables created by rank 0 only, the others just open it when required
+if(mpi_rank_id == 0) then
+  
+  print("Rank 0 creating the database ...")
+  
+  db = sqlite3.open("FV.db")
+
+  db:exec("PRAGMA journal_mode=WAL;")
+  db:exec("BEGIN TRANSACTION;")
+  
+  -- create the states table : it contains the escape time for this state
+  db:exec[[ CREATE TABLE CONDITIONS_LIST(
+            COND_ID   INTEGER NOT NULL PRIMARY KEY,
+            NREPS     INTEGER,
+            STATE     TEXT,
+            TAU_FV    REAL); ]]
+
+  -- create the crdvels table : it contains coordinates and velocities of the system for a given 'states' record
+  db:exec[[ CREATE TABLE CRD_VELS(
+            CV_ID INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            COND_ID INTEGER,
+            REP_ID  INTEGER,
+            ATOM_ID INTEGER,
+            X   REAL,
+            Y   REAL,
+            Z   REAL,
+            VX  REAL,
+            VY  REAL,
+            VZ  REAL,
+            UNIQUE (COND_ID, REP_ID, ATOM_ID)); ]]
+    
+  db:exec("END TRANSACTION;")
+  
+  db:close()
+  
+end
+
+local cond_id = 0
+local rep_id = mpi_rank_id
+local nreps = mpi_num_ranks
+
+function save_FV_initial_conditions(tauTime)
+
+  local start_t = hr_timer()
+  
+  print("Rank ",rep_id," accessing the database ...")
+
+  db = sqlite3.open("FV.db")
+  
+  db:busy_handler(busy_handler)
+
+  db:exec("PRAGMA journal_mode=WAL;")
+  
+  local stmt = nil
+  
+  if(mpi_rank_id == 0)
+  then
+    db:exec("BEGIN TRANSACTION;")
+    stmt = db:prepare(insert_statement_states)
+    
+    stmt:bind_names{condid=cond_id,nreps=nreps,state=fromState,tau=tauTime}
+    stmt:step()
+    
+--     if(ret ~= sqlite3.DONE)
+--     then
+--       print("SQLITE3 error in insert_statement_states ; code = ",ret," -> ",db:errmsg())
+--       --       exit_from_lua()
+--     end
+
+    stmt:finalize()
+    db:exec("END TRANSACTION;")
+  end
+  
+  -- to avoid quite poor I/O perfs we ask each replica to sleep for a short time
+  --  in order to not have all of them trying to modify the database at the same time
+  sleep_for_ms(rep_id+1)
+  
+  db:exec("BEGIN TRANSACTION;")
+  stmt = db:prepare(insert_statement_crdvels)
+  
+  for n=1,natoms
+  do
+    local x,y,z = get_coordinates(n)
+    local vx,vy,vz = get_velocities(n)
+
+    stmt:bind_names{ condid=cond_id, repid=rep_id, atid=n, x=x, y=y, z=z, vx=vx, vy=vy, vz=vz }
+    stmt:step()
+    
+--     if(ret ~= sqlite3.DONE)
+--     then
+--       print("SQLITE3 error in insert_statement_crdvels ; code = ",ret," -> ",db:errmsg())
+--       --       exit_from_lua()
+--     end
+
+    stmt:reset()
+
+  end
+  
+  stmt:finalize()
+  
+  db:exec("END TRANSACTION;")
+  
+  db:close()
+  
+  cond_id = cond_id + 1
+  
+  local end_t = hr_timer()
+  
+  print("Execution of save_FV_initial_conditions(...) on replica ",rep_id," took ",
+        hr_timediff_ms(start_t,end_t)," ms")
+  
+end
 
 --------------------------------------------------------------------------------------------------------------
 -- --------------- GELMAN RUBIN FUNCTIONS ESTIMATING OBSERVABLES ------------------------------

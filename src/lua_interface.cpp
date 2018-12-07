@@ -10,6 +10,7 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <thread>
 
 #include "sol.hpp"
 #include "rand.hpp"
@@ -193,82 +194,9 @@ void luaInterface::parse_lua_file()
     cerr << "Error : cannot find the mandatory 'function save_FV_initial_conditions)' in Lua script !" << endl;
     MPI_CUSTOM_ABORT_MACRO();
   }
-  
-//   /*
-//    * more parsing for parRep parameters
-//    */
-//   // first need to know if std parRep or FV parRep are used
-//   sol::optional<string> algo_type = lua["simulation"]["algorithm"];
-//   if(algo_type)
-//   {
-//     pvMap["algorithm"] = algo_type.value();
-//   }
-//   else
-//   {
-//     cerr << "Error when reading type of algorithm for section 'simulation' !" << endl;
-//     MPI_CUSTOM_ABORT_MACRO();
-//   }
-// 
-//   if(pvMap["algorithm"] == "PARREP")
-//   {
-//     cout << "Parsing ParRep simulation parameters." << endl;
-//     parse_parrep_params();
-//   }
-//   else if(pvMap["algorithm"] == "PARREP_FV")
-//   {
 
-  cout << "Parsing ParRep FV simulation parameters." << endl;
+  cout << "Parsing Fleming-Viot simulation parameters." << endl;
   parse_FV_params();
-    
-//     uint32_t num_ex_events = (uint32_t) stoul(pvMap.at("allowedExitEvents"));
-//     
-//     if(num_ex_events > 1)
-//     {
-//       sol::optional<ParRep_function_get_serialized_state> mandatory_get_serialized_state = lua.get<ParRep_function_get_serialized_state>("get_serialized_state");
-//       if(mandatory_get_serialized_state)
-//       {
-//         func_get_serialized_state = mandatory_get_serialized_state.value();
-//       }
-//       else
-//       {
-//         cerr << "Error : cannot find the mandatory 'function get_serialized_state()' in Lua script !" << endl;
-//         MPI_CUSTOM_ABORT_MACRO();
-//       }
-//       
-//       sol::optional<ParRep_function_put_serialized_state> mandatory_put_serialized_state = lua.get<ParRep_function_put_serialized_state>("put_serialized_state");
-//       if(mandatory_put_serialized_state)
-//       {
-//         func_put_serialized_state = mandatory_put_serialized_state.value();
-//       }
-//       else
-//       {
-//         cerr << "Error : cannot find the mandatory 'function put_serialized_state()' in Lua script !" << endl;
-//         MPI_CUSTOM_ABORT_MACRO();
-//       }
-//     }
-//     else
-//     {
-//       lua["get_serialized_state"] = [](){};
-//       func_get_serialized_state = lua.get<ParRep_function_get_serialized_state>("get_serialized_state");
-//       
-//       lua["put_serialized_state"] = [](){};
-//       func_put_serialized_state = lua.get<ParRep_function_put_serialized_state>("put_serialized_state");
-//     }
-//     
-//   }
-//   else
-//   {
-//     cerr << "Error when reading type of algorithm : " << pvMap["algorithm"] << " is not a valid type of algortihm ! " << endl;
-//     MPI_CUSTOM_ABORT_MACRO();
-//   }
-  
-//   // get database interface lua functions
-//   sol::table sqldb = lua.get<sol::table>("SQLiteDB");
-//   db_open    = sqldb.get<SQLiteDB_open>("open");
-//   db_close   = sqldb.get<SQLiteDB_close>("close");
-//   db_insert  = sqldb.get<SQLiteDB_insert>("insert_state");
-//   db_backup  = sqldb.get<SQLiteDB_backup>("backup_to_file");
-  
 }
 
 void luaInterface::register_default_lua_functions()
@@ -317,6 +245,30 @@ void luaInterface::register_default_lua_functions()
                    {
                      auto t = std::chrono::duration_cast<std::chrono::milliseconds>(after-before);
                      return t.count();
+                   }
+  );
+  
+  // the current replica will sleep for t milliseconds
+  lua.set_function("sleep_for_ms",
+                   [](uint64_t t)
+                   {
+                     this_thread::sleep_for(std::chrono::milliseconds(t));
+                   }
+  );
+  
+  // the current replica will sleep for t microseconds
+  lua.set_function("sleep_for_us",
+                   [](uint64_t t)
+                   {
+                     this_thread::sleep_for(std::chrono::microseconds(t));
+                   }
+  );
+  
+  // the current replica will sleep for t nanoseconds
+  lua.set_function("sleep_for_ns",
+                   [](uint64_t t)
+                   {
+                     this_thread::sleep_for(std::chrono::nanoseconds(t));
                    }
   );
   
@@ -569,7 +521,6 @@ void luaInterface::register_default_lua_functions()
 
 void luaInterface::register_default_lua_variables()
 {
-
   lua["mpi_rank_id"]    = my_id;
   lua["mpi_num_ranks"]  = num_procs;
   
@@ -577,84 +528,17 @@ void luaInterface::register_default_lua_variables()
   lua["timeStep"] = 0.0;
   lua["temperature"] = 0.0;
   
-//   lua.create_named_table("minimisation");
-//   lua["minimisation"]["Tolerance"] = 1e-6;
-//   lua["minimisation"]["MaxSteps"]  = 0;
-  
-//   lua["equilibrationSteps"] = 50e3;
-  
-//   lua.create_named_table("database");
-//   lua["database"]["name"] = "run.db";
-//   lua["database"]["backupFrequency"] = 500.0;
-  
   lua["epot"] = 0.0;
   lua["ekin"] = 0.0;
   lua["etot"] = 0.0;
-  lua["referenceTime"] = 0.0;
-  
-//   lua.create_named_table("SQLiteDB");
-//   
-//   // expose dummy lambda functions ; they do nothing
-//   //  and are the default in case the user does not override them in the lua script
-//   lua["SQLiteDB"]["open"].set_function(
-//     []()->void
-//     {
-//       cerr << "Dummy lambda db_open\n";
-//     }
-//   );
-//   
-//   lua["SQLiteDB"]["close"].set_function(
-//     []()->void
-//     {
-//       cerr << "Dummy lambda db_close\n";
-//     }
-//   );
-//   
-//   lua["SQLiteDB"]["insert_state"].set_function(
-//     []()->void
-//     {
-//       cerr << "Dummy lambda db_insert\n";
-//     }
-//   );
-//   
-//   lua["SQLiteDB"]["backup_to_file"].set_function(
-//     []()->void
-//     {
-//       cerr << "Dummy lambda db_backup\n";
-//     }
-//   );
-  
 }
-
-// void luaInterface::parse_parrep_params()
-// {
-//   sol::table simulation_def = lua.get<sol::table>("simulation");
-// 
-//   pvMap["tauDecorr"] = to_string(simulation_def["tauDecorr"].get_or(10.0));
-//   pvMap["checkDecorr"] = to_string(simulation_def["checkDecorr"].get_or(100));
-//   
-// 
-//   pvMap["tauDephase"] = to_string(simulation_def["tauDephase"].get_or(10.0));
-//   pvMap["checkDephase"] = to_string(simulation_def["checkDephase"].get_or(100));
-//   
-// 
-//   pvMap["checkDynamics"] = to_string(simulation_def["checkDynamics"].get_or(100));
-//   
-// }
 
 void luaInterface::parse_FV_params()
 {
- 
   sol::table simulation_def = lua.get<sol::table>("simulation");
-  
-//   pvMap["allowedExitEvents"] = to_string(simulation_def["allowedExitEvents"].get_or(1));
-//   
-//   pvMap["afterExit"] = simulation_def["afterExit"].get_or(string("wait"));
-  
+
   pvMap["checkFV"] = to_string(simulation_def["checkFV"].get_or(100));
   pvMap["checkGR"] = to_string(simulation_def["checkGR"].get_or(1));
-  
-//   pvMap["checkDynamics"] = to_string(simulation_def["checkDynamics"].get_or(100));
   
   sol::optional<sol::table> gr_functions_list = simulation_def.get<sol::table>("GRobservables");
   if(gr_functions_list)
@@ -671,10 +555,9 @@ void luaInterface::parse_FV_params()
   }
   else
   {
-    cerr << "Error when trying to read simulation.GRobservables which is required for a 'parrepFV' simulation !" << endl;
+    cerr << "Error when trying to read simulation.GRobservables which is required for a Fleming-Viot simulation !" << endl;
     MPI_CUSTOM_ABORT_MACRO();
   }
   
   pvMap["GRtol"] = to_string(simulation_def["GRtol"].get_or(0.01));
-  
 }

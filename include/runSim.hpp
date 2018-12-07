@@ -18,7 +18,6 @@
  * @brief This function, called from main, is in charge of:
  * 
  *  + Parsing Input file
- *  + Setting up the desired type of parRep run_simulation
  *  + Running the simulation
  */
 void run_simulation(const std::string& inpf);
